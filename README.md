@@ -6,7 +6,11 @@ a combo repo for a vim plugin that interfaces with the [daedalus](https://github
 
 # Usage
 
-Eventually you should download the bin from the releases and copy it to your board and then follow the vim plugin steps i will add below.
+So the orginal goal was for keystrokes to make a nice pattern in your status bar as well as on the led matrix of daedalus but I couldn't get the serial to work from vim; not entirely sure why but it really doesn't like this for some reason.
+
+What I do have instead is firmware for random led blinking when a serial character is detected and a vim plugin that displays random braille characters in the status bar.
+
+You can read the [plugin](/lua/braille_indicator/README.md) for more information on installation and for the firmware you can use any serial interface set to a `115200` baud rate (screen for example `screen /dev/tty.usbmodem101 115200`).
 
 <p align="center">
 	<img src="https://raw.githubusercontent.com/taciturnaxolotl/carriage/main/.github/images/line-break.svg" />
