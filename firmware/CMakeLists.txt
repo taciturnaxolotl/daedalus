@@ -28,6 +28,7 @@ target_link_libraries(${PROJECT_NAME}
     pico_stdlib
     hardware_gpio
     hardware_uart
+    hardware_pwm
     pico_multicore
 )
 

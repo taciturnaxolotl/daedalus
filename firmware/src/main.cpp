@@ -1,33 +1,37 @@
 #include <stdlib.h>
 
 #include <cstring>
+#include <stdio.h>
 
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
+#include <time.h>
 
 // Define GPIO pins for rows and columns
-const uint ROW_PINS[4] = {12, 13, 14, 15};
-const uint COL_PINS[6] = {17, 18, 19, 20, 21, 22};
-
 #define ROWS 4
 #define COLS 6
+
+const uint ROW_PINS[4] = {12, 13, 14, 15};
+const uint COL_PINS[6] = {17, 18, 19, 20, 21, 22};
 
 // LED state matrix
 uint8_t led_states[ROWS][COLS] = {0};
 
-void setup_pins() {
-  // Set up row pins
-  for (int i = 0; i < ROWS; i++) {
-    gpio_init(ROW_PINS[i]);
-    gpio_set_dir(ROW_PINS[i], GPIO_OUT);
-    gpio_put(ROW_PINS[i], 0);  // Start with LEDs off
-  }
+// brightness control
+uint8_t brightness = 100;
 
-  // Set up column pins
-  for (int j = 0; j < COLS; j++) {
-    gpio_init(COL_PINS[j]);
-    gpio_set_dir(COL_PINS[j], GPIO_OUT);
-    gpio_put(COL_PINS[j], 1);  // Start with LEDs off
+// timing vars
+bool fading = false;
+absolute_time_t last_char_time;
+absolute_time_t fade_start_time;
+const uint32_t inactivity_timeout_ms = 0;
+const uint32_t fade_duration_ms = 1200;
+
+void randomize_matrix() {
+  for (int row = 0; row < ROWS; row++) {
+    for (int col = 0; col < COLS; col++) {
+      led_states[row][col] = rand() % 2;
+    }
   }
 }
 
@@ -44,65 +48,77 @@ void update_led_display(uint32_t refresh_rate_hz) {
 
   last_update = current_time;
 
-  // Display the current state
-  for (int row = 0; row < ROWS; row++) {
-    // Set row active
-    gpio_put(ROW_PINS[row], 1);
+  uint32_t time_since_last_char = absolute_time_diff_us(last_char_time, get_absolute_time()) / 1000;
 
-    // Set column states for this row
-    for (int col = 0; col < COLS; col++) {
-      // LED on = column LOW, LED off = column HIGH
-      gpio_put(COL_PINS[col], led_states[row][col] ? 0 : 1);
-    }
-
-    // Small delay for this row to be visible
-    sleep_us(100);
-
-    // Deactivate row
-    gpio_put(ROW_PINS[row], 0);
+  if (!fading && time_since_last_char > inactivity_timeout_ms) {
+    // start fading
+    fading = true;
+    fade_start_time = get_absolute_time();
   }
-}
 
-// Function to set a specific LED state
-void set_led(int row, int col, bool state) {
-  if (row >= 0 && row < ROWS && col >= 0 && col < COLS) {
-    led_states[row][col] = state ? 1 : 0;
-  }
-}
+  if (fading) {
+    uint32_t fade_elapsed_ms = absolute_time_diff_us(fade_start_time, get_absolute_time()) / 1000;
 
-// Function to set the entire matrix state
-void set_matrix_state(const uint8_t new_state[ROWS][COLS]) {
-  memcpy(led_states, new_state, sizeof(led_states));
-}
-
-void random_state(float density) {
-  // clamp
-  if (density > 1.0f)
-    density = 1.0f;
-  if (density < 0.0f)
-    density = 0.0f;
-
-  for (int row = 0; row < ROWS; row++) {
-    for (int col = 0; col < COLS; col++) {
-      float r = (float)rand() / (float)RAND_MAX;
-      led_states[row][col] = (r < density) ? 1 : 0;
+    if (fade_elapsed_ms >= fade_duration_ms) {
+      brightness = 0;
+    } else {
+      brightness = 100 - ((fade_elapsed_ms * 100) / fade_duration_ms);
     }
   }
+
+  // Skip display update if brightness is 0
+  if (brightness == 0) {
+    // Turn off all rows and set all columns high to ensure LEDs are off
+    for (int i = 0; i < ROWS; i++) {
+      gpio_put(ROW_PINS[i], 0);
+    }
+    for (int j = 0; j < COLS; j++) {
+      gpio_put(COL_PINS[j], 1);
+    }
+
+    return;
+  }
+
+  // Software PWM cycle
+  for (uint8_t pwm_cycle = 0; pwm_cycle < brightness; pwm_cycle++) {
+    // For each row
+    for (int row = 0; row < ROWS; row++) {
+      // Activate row
+      gpio_put(ROW_PINS[row], 1);
+
+      // Set column states for this row
+      for (int col = 0; col < COLS; col++) {
+        gpio_put(COL_PINS[col], led_states[row][col] ? 0 : 1);
+      }
+
+      // Keep row active for a short time
+      sleep_us(50);
+
+      // Deactivate row
+      gpio_put(ROW_PINS[row], 0);
+    }
+  }
 }
+void setup_pins() {
+  // Set up row pins
+  for (int i = 0; i < ROWS; i++) {
+    gpio_init(ROW_PINS[i]);
+    gpio_set_dir(ROW_PINS[i], GPIO_OUT);
+    gpio_put(ROW_PINS[i], 0);  // Start with LEDs off
+  }
 
-const uint8_t ALL_ON[ROWS][COLS] = {{1, 1, 1, 1, 1, 1},
-                                    {1, 1, 1, 1, 1, 1},
-                                    {1, 1, 1, 1, 1, 1},
-                                    {1, 1, 1, 1, 1, 1}};
-
-const uint8_t ALL_OFF[ROWS][COLS] = {{0, 0, 0, 0, 0, 0},
-                                     {0, 0, 0, 0, 0, 0},
-                                     {0, 0, 0, 0, 0, 0},
-                                     {0, 0, 0, 0, 0, 0}};
+  // Set up column pins
+  for (int j = 0; j < COLS; j++) {
+    gpio_init(COL_PINS[j]);
+    gpio_set_dir(COL_PINS[j], GPIO_OUT);
+    gpio_put(COL_PINS[j], 1);  // Start with LEDs off
+  }
+}
 
 void core1_main() {
   while (true) {
-    update_led_display(1000);
+    update_led_display(1000);  // Update at 60Hz for smoother display
+    sleep_ms(1);  // Small delay to prevent tight loop
   }
 }
 
@@ -110,13 +126,31 @@ int main() {
   stdio_init_all();
   setup_pins();
 
+  // seed the random number generator
+  srand(time_us_32());
+
+  last_char_time = get_absolute_time();
+
   multicore_launch_core1(core1_main);
 
   while (true) {
-    random_state(0.5);  // Turn random LEDs ON
-    // set_matrix_state(ALL_ON);
-    sleep_ms(200);
-    // set_matrix_state(ALL_OFF);
-    // sleep_ms(500);
+    // check if there are characters available from the input
+    int c = getchar_timeout_us(0);
+
+    if (c != PICO_ERROR_TIMEOUT) {
+      // echo char back
+      printf("%c", c);
+
+      last_char_time = get_absolute_time();
+
+      fading = false;
+      brightness = 100;
+
+      randomize_matrix();
+
+      while (getchar_timeout_us(0) != PICO_ERROR_TIMEOUT) {}
+    }
+
+    sleep_ms(10);
   }
 }
